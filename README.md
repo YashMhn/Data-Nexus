@@ -75,7 +75,7 @@ CSV Upload → FastAPI (Pandas) → Type Detection → NaN Cleanup → JSON Payl
 ### 1. Clone & Start Backend
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/data-nexus.git
+git clone https://github.com/YashMhn/data-nexus.git
 cd data-nexus/backend
 
 # Using uv (recommended)
