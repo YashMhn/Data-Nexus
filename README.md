@@ -111,7 +111,6 @@ npm run dev
 | Dataset | What You'll See |
 |---------|----------------|
 | [NY Airbnb](https://www.kaggle.com/datasets/dgomonov/new-york-city-airbnb-open-data) | Spatial map of listings + price analysis by neighborhood |
-| [World Happiness](https://www.kaggle.com/datasets/unsdsn/world-happiness-report) | Country comparison bar charts with score aggregation |
 | [Superstore Sales](https://www.kaggle.com/datasets/vivek468/superstore-dataset-final) | Product category breakdown with profit/sales metrics |
 
 ## 🛠️ Tech Stack
