@@ -125,6 +125,8 @@ npm run dev
 | **Styling** | Vanilla CSS | Glassmorphism, CSS variables, native resize |
 | **Optimization** | React.lazy, Suspense, Vite chunking | Code-split bundles under 400 kB each |
 
+# Work In Progress
+
 ## 📄 License
 
 MIT — feel free to fork, modify, and use in your own projects.
