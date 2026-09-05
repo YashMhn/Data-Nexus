@@ -1,288 +1,228 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { Suspense, lazy, useCallback, useState } from 'react';
 import './index.css';
 import 'leaflet/dist/leaflet.css';
-import DBConnectionPanel from './components/DBConnectionPanel';
 import FileUploadPanel from './components/FileUploadPanel';
+import DatasetSummaryPanel from './components/DatasetSummaryPanel';
+import ChartPanel from './components/charts/ChartPanel';
+import { deleteDataset } from './api';
+import type { AxisConfig, ChartType, DatasetSummary } from './types';
 
-// Lazy-load heavy visualization libraries for code-splitting
-const ChartVisuals = lazy(() => import('./components/charts/ChartVisuals'));
 const SpatialMapVisual = lazy(() => import('./components/spatial/SpatialMapVisual'));
 
-const TabButton = ({ active, label, onClick }: any) => (
-  <button 
+const CHART_TYPES: ChartType[] = ['bar', 'line', 'pie', 'donut', 'scatter'];
+
+const WIDGETS = [
+  { id: 'metrics', label: 'Metrics' },
+  { id: 'map', label: 'Spatial Map' },
+  { id: 'bar', label: 'Bar Chart' },
+  { id: 'line', label: 'Line Chart' },
+  { id: 'pie', label: 'Pie Chart' },
+  { id: 'donut', label: 'Donut Chart' },
+  { id: 'scatter', label: 'Scatter Plot' },
+] as const;
+
+const numberFormat = new Intl.NumberFormat();
+
+interface TabButtonProps {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}
+
+const TabButton = ({ active, label, onClick }: TabButtonProps) => (
+  <button
+    type="button"
+    className={`tab${active ? ' tab--active' : ''}`}
+    aria-pressed={active}
     onClick={onClick}
-    style={{
-      background: active ? 'var(--accent)' : 'transparent',
-      color: active ? '#fff' : 'var(--text-muted)',
-      border: active ? '1px solid var(--accent-hover)' : '1px solid transparent',
-      padding: '4px 12px',
-      borderRadius: '20px',
-      cursor: 'pointer',
-      fontSize: '0.85rem',
-      fontWeight: active ? 600 : 400,
-      transition: 'all 0.2s'
-    }}
   >
     {label}
   </button>
 );
 
+function buildInitialConfigs(dataset: DatasetSummary): Record<ChartType, AxisConfig> {
+  const { suggested } = dataset;
+  const categoryX =
+    suggested.x ?? dataset.categorical_columns[0] ?? dataset.temporal_columns[0] ?? '';
+  const valueY = suggested.y ?? dataset.numeric_columns[0] ?? '';
+  const scatterX = suggested.scatter_x ?? dataset.numeric_columns[0] ?? '';
+  const scatterY =
+    suggested.scatter_y ?? dataset.numeric_columns[1] ?? dataset.numeric_columns[0] ?? '';
+
+  return {
+    bar: { x: categoryX, y: valueY, agg: 'sum' },
+    line: { x: categoryX, y: valueY, agg: 'sum' },
+    pie: { x: categoryX, y: valueY, agg: 'sum' },
+    donut: { x: categoryX, y: valueY, agg: 'sum' },
+    scatter: { x: scatterX, y: scatterY, agg: 'sum' },
+  };
+}
+
 function App() {
-  const [dbStatus, setDbStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
-  const [spatialData, setSpatialData] = useState<any[] | undefined>(undefined);
-  const [metrics, setMetrics] = useState<any>(null);
-  const [axisConfigs, setAxisConfigs] = useState<Record<string, { x: string, y: string, agg: string }>>({});
-  const [rawData, setRawData] = useState<any[]>([]);
-  const [strCols, setStrCols] = useState<string[]>([]);
-  const [numCols, setNumCols] = useState<string[]>([]);
-  const AGG_METHODS = ['sum', 'average', 'max', 'min', 'count'];
-  
-  // Multi-select state
-  const WIDGETS = [
-    { id: 'map', label: 'Spatial Map' },
-    { id: 'metrics', label: 'Metrics' },
-    { id: 'bar', label: 'Bar Chart' },
-    { id: 'line', label: 'Line Chart' },
-    { id: 'pie', label: 'Pie Chart' },
-    { id: 'donut', label: 'Donut Chart' },
-    { id: 'scatter', label: 'Scatter Plot' }
-  ];
-  const [activeWidgets, setActiveWidgets] = useState<string[]>(['metrics', 'map', 'bar']);
+  const [dataset, setDataset] = useState<DatasetSummary | null>(null);
+  const [axisConfigs, setAxisConfigs] = useState<Record<ChartType, AxisConfig> | null>(
+    null,
+  );
+  const [activeWidgets, setActiveWidgets] = useState<string[]>([
+    'metrics',
+    'map',
+    'bar',
+  ]);
 
-  const toggleWidget = (id: string) => {
-    setActiveWidgets(prev => prev.includes(id) ? prev.filter(w => w !== id) : [...prev, id]);
-  };
+  const handleUploaded = useCallback(
+    (summary: DatasetSummary) => {
+      // Release the previous frame server-side; the store is bounded and there
+      // is no reason to hold a dataset nobody is looking at.
+      if (dataset) void deleteDataset(dataset.dataset_id).catch(() => undefined);
+      setDataset(summary);
+      setAxisConfigs(buildInitialConfigs(summary));
+    },
+    [dataset],
+  );
 
-  // Auto-fetch mock data from backend when DB-connected (not from file upload)
-  useEffect(() => {
-    if (dbStatus === 'connected' && !spatialData && rawData.length === 0) {
-      fetch('http://localhost:8000/api/data/bar-chart')
-        .then(res => res.json())
-        .catch(err => console.error("Failed to fetch data:", err));
-    }
-  }, [dbStatus, spatialData, rawData]);
+  const handleClear = useCallback(() => {
+    if (dataset) void deleteDataset(dataset.dataset_id).catch(() => undefined);
+    setDataset(null);
+    setAxisConfigs(null);
+  }, [dataset]);
 
-  const handleConnect = async (credentials: any) => {
-    setDbStatus('connecting');
-    // Simulate connection delay to backend
-    setTimeout(() => {
-      console.log('Connected to backend with:', credentials);
-      setDbStatus('connected');
-    }, 1200);
-  };
+  const updateConfig = useCallback((type: ChartType, patch: Partial<AxisConfig>) => {
+    setAxisConfigs((previous) =>
+      previous ? { ...previous, [type]: { ...previous[type], ...patch } } : previous,
+    );
+  }, []);
 
-  const handleUploadSuccess = (uploadData: any) => {
-    setDbStatus('connected');
-    
-    // Always wipe slate clean for new uploads
-    setSpatialData(uploadData.spatial && uploadData.spatial.length > 0 ? uploadData.spatial : []);
-    setMetrics(uploadData.metrics || null);
-    setRawData(uploadData.raw_data || []);
-    setStrCols(uploadData.str_cols || []);
-    setNumCols(uploadData.num_cols || []);
-    
-    // Setup isolated independent configurations for each chart view
-    const initialConfigs: Record<string, { x: string, y: string, agg: string }> = {};
-    const bestNumCols = uploadData.meaningful_num_cols?.length > 0 ? uploadData.meaningful_num_cols : uploadData.num_cols || [];
-    const dX = uploadData.str_cols?.[0] || '';
-    const dY = bestNumCols[0] || '';
-    const scX = bestNumCols.length > 1 ? bestNumCols[1] : bestNumCols[0] || dX;
-    ['bar', 'line', 'pie', 'donut', 'scatter'].forEach(t => {
-      initialConfigs[t] = { x: t === 'scatter' ? scX : dX, y: dY, agg: 'sum' };
-    });
-    setAxisConfigs(initialConfigs);
-  };
+  const toggleWidget = useCallback((id: string) => {
+    setActiveWidgets((previous) =>
+      previous.includes(id)
+        ? previous.filter((widget) => widget !== id)
+        : [...previous, id],
+    );
+  }, []);
 
-  const getDerivedData = (type: string, colX: string, colY: string, aggMethod: string = 'sum') => {
-    if (!rawData.length || !colX || !colY) return [];
-    if (type === 'scatter') {
-       return rawData.slice(0, 200).map((row: any, i: number) => ({
-         x: parseFloat(row[colX]) || 0,
-         y: parseFloat(row[colY]) || 0,
-         name: String(row[strCols[0] || ''] || `Point ${i}`)
-       }));
-    } else {
-       // Group by X column
-       const groups: Record<string, number[]> = {};
-       rawData.forEach((row: any) => {
-         const key = String(row[colX] ?? 'Unknown').substring(0, 20);
-         const val = parseFloat(row[colY]);
-         if (!groups[key]) groups[key] = [];
-         if (!isNaN(val)) groups[key].push(val);
-       });
-       
-       // Aggregate based on selected method
-       return Object.entries(groups)
-         .map(([name, values]) => {
-           let value = 0;
-           switch (aggMethod) {
-             case 'sum': value = values.reduce((a, b) => a + b, 0); break;
-             case 'average': value = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0; break;
-             case 'max': value = values.length > 0 ? Math.max(...values) : 0; break;
-             case 'min': value = values.length > 0 ? Math.min(...values) : 0; break;
-             case 'count': value = values.length; break;
-             default: value = values.reduce((a, b) => a + b, 0);
-           }
-           return { name, value: Math.round(value * 100) / 100 };
-         })
-         .sort((a, b) => b.value - a.value)
-         .slice(0, 15);
-    }
-  };
+  const metrics = dataset?.metrics ?? null;
 
   return (
     <div className="app-container">
-      {/* Sidebar for Controls */}
       <aside className="sidebar">
-        <DBConnectionPanel onConnect={handleConnect} status={dbStatus} />
-        <FileUploadPanel onUploadSuccess={handleUploadSuccess} />
-        
-        {/* We can add more controls here later */}
-        <div className="glass-panel" style={{ marginTop: '24px' }}>
-          <h3 style={{ margin: '0 0 16px', fontWeight: 500 }}>Insights</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5 }}>
-            {dbStatus === 'connected' 
-              ? "Connection verified. Analyzing spatial trends and monthly aggregation." 
-              : "Connect to a database engine to stream insights."}
-          </p>
-        </div>
+        <FileUploadPanel
+          onUploaded={handleUploaded}
+          currentFilename={dataset?.filename ?? null}
+        />
+        <DatasetSummaryPanel dataset={dataset} onClear={handleClear} />
       </aside>
 
-      {/* Main Dashboard Area */}
       <main className="dashboard-main">
-        <header className="dashboard-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+        <header className="dashboard-header">
+          <div className="dashboard-header__top">
             <h1>Data Nexus</h1>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '8px', 
-              background: 'var(--panel-bg)', padding: '8px 16px', 
-              borderRadius: '20px', border: '1px solid var(--panel-border)'
-            }}>
-              <div style={{
-                width: '8px', height: '8px', borderRadius: '50%',
-                background: dbStatus === 'connected' ? 'var(--success)' : 
-                            dbStatus === 'connecting' ? 'orange' : 'var(--danger)',
-                boxShadow: `0 0 10px ${dbStatus === 'connected' ? 'var(--success)' : 'transparent'}`
-              }}></div>
-              <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                {dbStatus === 'connected' ? 'Live Stream' : 'Offline'}
-              </span>
+            <div className="status-pill">
+              <span
+                className={`status-dot ${dataset ? 'status-dot--ok' : 'status-dot--idle'}`}
+              />
+              <span>{dataset ? dataset.filename : 'No dataset'}</span>
             </div>
           </div>
-          
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', background: 'rgba(0,0,0,0.3)', padding: '6px', borderRadius: '24px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', padding: '6px 12px' }}>Active Widgets:</span>
-            {WIDGETS.map(w => (
-              <TabButton 
-                key={w.id} 
-                active={activeWidgets.includes(w.id)} 
-                label={w.label} 
-                onClick={() => toggleWidget(w.id)} 
+
+          <div className="widget-toggles">
+            <span className="widget-toggles__label">Active widgets</span>
+            {WIDGETS.map((widget) => (
+              <TabButton
+                key={widget.id}
+                active={activeWidgets.includes(widget.id)}
+                label={widget.label}
+                onClick={() => toggleWidget(widget.id)}
               />
             ))}
           </div>
         </header>
 
         <div className="dashboard-grid">
-          
-          {/* Dynamically Render Active Widgets */}
-          
           {activeWidgets.includes('metrics') && (
-            <div className="glass-panel resizable full-width" style={{ minHeight: '200px', height: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-              <h3 style={{ margin: '0 0 16px', fontWeight: 500, alignSelf: 'flex-start', width: '100%' }}>Dataset Metrics</h3>
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                 {metrics ? (
-                   <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '32px' }}>
-                     <div>
-                       <div style={{ fontSize: '3rem', color: 'var(--text-main)', fontWeight: 600, textShadow: '0 0 20px var(--accent-glow)', lineHeight: 1.1 }}>
-                         {metrics.total_rows.toLocaleString()}
-                       </div>
-                       <div>Total Rows Vectorized</div>
-                     </div>
-                     <div>
-                       <div style={{ fontSize: '2rem', color: 'var(--text-main)', fontWeight: 500, marginTop: '8px' }}>{metrics.columns_count}</div>
-                       <div style={{ fontSize: '0.85rem' }}>Dimensions</div>
-                     </div>
-                     {metrics.top_category && metrics.top_category !== "N/A" && (
-                       <div>
-                         <div style={{ fontSize: '2rem', color: 'var(--accent-hover)', fontWeight: 500, marginTop: '8px' }}>{metrics.top_category}</div>
-                         <div style={{ fontSize: '0.85rem' }}>Top Category</div>
-                       </div>
-                     )}
-                   </div>
-                 ) : dbStatus === 'connected' ? (
-                   "Calculating via Vectors..."
-                 ) : (
-                   "Awaiting Data..."
-                 )}
-              </div>
-            </div>
-          )}
-
-          {activeWidgets.includes('map') && (
-            <div className="glass-panel resizable">
-              <h3 style={{ margin: '0 0 16px', fontWeight: 500 }}>Geospatial Distribution</h3>
-              <div style={{ flex: 1, position: 'relative', borderRadius: '12px', overflow: 'hidden' }}>
-                <Suspense fallback={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Loading Map...</div>}>
-                  <SpatialMapVisual isActive={dbStatus === 'connected'} externalData={spatialData} />
-                </Suspense>
-              </div>
-            </div>
-          )}
-
-          {['bar', 'line', 'pie', 'donut', 'scatter'].map(chartType => {
-            if (!activeWidgets.includes(chartType)) return null;
-            
-            const config = axisConfigs[chartType] || { x: '', y: '', agg: 'sum' };
-            const curX = config.x;
-            const curY = config.y;
-            const curAgg = config.agg || 'sum';
-            const subtitle = metrics && curX && curY ? (chartType === 'scatter' ? `Plotting '${curY}' vs '${curX}'` : `'${curX}' by ${curAgg} of '${curY}'`) : null;
-            const derived = getDerivedData(chartType, curX, curY, curAgg);
-
-            const setAxis = (field: 'x'|'y'|'agg', val: string) => {
-              setAxisConfigs(prev => ({ ...prev, [chartType]: { ...prev[chartType], [field]: val } }));
-            };
-            
-            const selectStyle = { background: 'var(--bg-color)', color: '#fff', border: '1px solid var(--panel-border)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.8rem', outline: 'none', maxWidth: '150px' };
-            
-            return (
-              <div key={chartType} className="glass-panel resizable">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ minWidth: '120px' }}>
-                    <h3 style={{ margin: '0 0 4px', fontWeight: 500, textTransform: 'capitalize' }}>{chartType} Analysis</h3>
-                    {subtitle ? (
-                      <p style={{ margin: '0 0 12px', fontSize: '0.8rem', color: 'var(--accent-hover)' }}>{subtitle}</p>
-                    ) : (
-                      <div style={{ marginBottom: '12px' }}></div>
-                    )}
+            <section className="glass-panel resizable full-width">
+              <h3 className="panel-title">Dataset metrics</h3>
+              {metrics ? (
+                <div className="metric-row">
+                  <div className="metric">
+                    <span className="metric__value metric__value--hero">
+                      {numberFormat.format(metrics.analyzed_rows)}
+                    </span>
+                    <span className="metric__label">
+                      {metrics.truncated ? 'Rows analysed (capped)' : 'Rows analysed'}
+                    </span>
                   </div>
-                  
-                  {/* Axis + Aggregation Selectors */}
-                  {strCols.length > 0 && numCols.length > 0 && (
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      <select value={curX} onChange={e => setAxis('x', e.target.value)} style={selectStyle}>
-                        {strCols.concat(chartType === 'scatter' ? numCols : []).map(c => <option key={c} value={c}>{c} (X)</option>)}
-                      </select>
-                      <select value={curAgg} onChange={e => setAxis('agg', e.target.value)} style={selectStyle}>
-                        {AGG_METHODS.map(m => <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
-                      </select>
-                      <select value={curY} onChange={e => setAxis('y', e.target.value)} style={selectStyle}>
-                        {numCols.map(c => <option key={c} value={c}>{c} (Y)</option>)}
-                      </select>
+                  <div className="metric">
+                    <span className="metric__value">{metrics.columns_count}</span>
+                    <span className="metric__label">Columns</span>
+                  </div>
+                  {metrics.top_category && (
+                    <div className="metric">
+                      <span className="metric__value metric__value--accent">
+                        {metrics.top_category}
+                      </span>
+                      <span className="metric__label">Top category</span>
+                    </div>
+                  )}
+                  {metrics.total_value !== null && metrics.total_value_column && (
+                    <div className="metric">
+                      <span className="metric__value">
+                        {numberFormat.format(Math.round(metrics.total_value))}
+                      </span>
+                      <span className="metric__label">
+                        Total {metrics.total_value_column}
+                      </span>
                     </div>
                   )}
                 </div>
-                
-                <div style={{ flex: 1, position: 'relative' }}>
-                  <Suspense fallback={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Loading Chart...</div>}>
-                    <ChartVisuals type={chartType as any} data={chartType === 'scatter' ? [] : derived} scatterData={chartType === 'scatter' ? derived : []} isActive={dbStatus === 'connected'} />
-                  </Suspense>
+              ) : (
+                <div className="chart-placeholder chart-placeholder--muted">
+                  Awaiting a dataset.
                 </div>
+              )}
+            </section>
+          )}
+
+          {activeWidgets.includes('map') && (
+            <section className="glass-panel resizable">
+              <h3 className="panel-title">Geospatial distribution</h3>
+              <div className="panel-body panel-body--map">
+                <Suspense
+                  fallback={
+                    <div className="chart-placeholder">
+                      <span className="pulse">Loading map…</span>
+                    </div>
+                  }
+                >
+                  <SpatialMapVisual
+                    points={dataset?.spatial ?? []}
+                    hasDataset={dataset !== null}
+                    truncated={dataset?.spatial_truncated ?? false}
+                  />
+                </Suspense>
               </div>
-            );
-          })}
-          
+            </section>
+          )}
+
+          {CHART_TYPES.filter((type) => activeWidgets.includes(type)).map((type) =>
+            dataset && axisConfigs ? (
+              <ChartPanel
+                key={type}
+                type={type}
+                dataset={dataset}
+                config={axisConfigs[type]}
+                onConfigChange={(patch) => updateConfig(type, patch)}
+              />
+            ) : (
+              <section key={type} className="glass-panel resizable">
+                <h3 className="panel-title panel-title--chart">{type} analysis</h3>
+                <div className="panel-body">
+                  <div className="chart-placeholder chart-placeholder--muted">
+                    Awaiting a dataset.
+                  </div>
+                </div>
+              </section>
+            ),
+          )}
         </div>
       </main>
     </div>

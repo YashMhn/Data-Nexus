@@ -1,142 +1,222 @@
-import React from 'react';
-import { 
-  BarChart, Bar, PieChart, Pie, LineChart, Line, ScatterChart, Scatter, 
-  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, Legend, ZAxis 
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+  ZAxis,
 } from 'recharts';
+import type { ChartType, ScatterDatum, SeriesPoint } from '../../types';
 
 interface ChartVisualsProps {
-  data: any[];
-  scatterData?: any[];
-  isActive: boolean;
-  type: 'bar' | 'pie' | 'donut' | 'line' | 'scatter';
+  type: ChartType;
+  series: SeriesPoint[];
+  points: ScatterDatum[];
 }
 
-const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b', '#3b82f6'];
+const COLORS = [
+  '#6366f1',
+  '#8b5cf6',
+  '#ec4899',
+  '#14b8a6',
+  '#f59e0b',
+  '#3b82f6',
+];
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
-    return (
-      <div style={{
-        background: 'rgba(20, 24, 39, 0.85)',
-        backdropFilter: 'blur(12px)',
-        border: '1px solid rgba(255,255,255,0.15)',
-        padding: '12px',
-        borderRadius: '8px',
-        color: '#fff',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.6)'
-      }}>
-        <p style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>{label || payload[0]?.payload?.name}</p>
-        {payload.map((entry: any, index: number) => (
-          <p key={index} style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: entry.color || 'var(--text-main)' }}>
-            {entry.name && entry.name !== 'value' && entry.name !== 'y' ? `${entry.name}: ` : ''} 
-            {entry.value?.toLocaleString()}
-          </p>
-        ))}
-      </div>
-    );
-  }
-  return null;
+// Recharts injects these; every field is optional because we render the
+// element ourselves with no props.
+interface TooltipEntry {
+  name?: string | number;
+  value?: number | string;
+  color?: string;
+  payload?: { name?: string };
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  label?: string | number;
+}
+
+const numberFormat = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 2,
+});
+
+function formatValue(value: number | string | undefined): string {
+  if (typeof value === 'number') return numberFormat.format(value);
+  return value ?? '';
+}
+
+const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
+  if (!active || !payload?.length) return null;
+  const heading = label ?? payload[0]?.payload?.name ?? '';
+  return (
+    <div className="chart-tooltip">
+      <p className="chart-tooltip__label">{heading}</p>
+      {payload.map((entry, index) => (
+        <p
+          key={index}
+          className="chart-tooltip__value"
+          style={{ color: entry.color ?? 'var(--text-main)' }}
+        >
+          {entry.name && entry.name !== 'value' && entry.name !== 'y'
+            ? `${entry.name}: `
+            : ''}
+          {formatValue(entry.value)}
+        </p>
+      ))}
+    </div>
+  );
 };
 
-const ChartVisuals: React.FC<ChartVisualsProps> = ({ data, scatterData, isActive, type }) => {
-  if (!isActive) {
-    return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-        Awaiting Connection...
-      </div>
-    );
-  }
+const Placeholder = ({ children }: { children: string }) => (
+  <div className="chart-placeholder">{children}</div>
+);
 
-  const hasData = type === 'scatter' ? (scatterData && scatterData.length > 0) : (data && data.length > 0);
-  if (!hasData) {
-    return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)' }}>
-        <div style={{ animation: 'pulse 1.5s infinite' }}>Insufficient Data for Analysis</div>
-      </div>
-    );
-  }
-
-  const renderChart = () => {
-    switch (type) {
-      case 'pie':
-      case 'donut':
-        return (
-          <PieChart>
-            <Tooltip content={<CustomTooltip />} />
-            <Legend verticalAlign="bottom" height={36} iconType="circle" />
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius={type === 'donut' ? 60 : 0}
-              outerRadius={90}
-              paddingAngle={type === 'donut' ? 3 : 0}
-              dataKey="value"
-              stroke="none"
-              animationDuration={1500}
-            >
-              {data.map((_, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-              ))}
-            </Pie>
-          </PieChart>
-        );
-
-      case 'line':
-        return (
-          <LineChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-            <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-            <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `${val}`} />
-            <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 2 }} />
-            <Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={4} dot={{ r: 4, fill: '#fff' }} activeDot={{ r: 8 }} animationDuration={1500} />
-          </LineChart>
-        );
-
-      case 'scatter':
-        if (!scatterData || scatterData.length === 0) return <div style={{color:'var(--text-muted)', textAlign:'center', paddingTop:'15%'}}>Need 2 numeric columns for Scatter</div>;
-        return (
-          <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis type="number" dataKey="x" stroke="var(--text-muted)" tickLine={false} axisLine={false} />
-            <YAxis type="number" dataKey="y" stroke="var(--text-muted)" tickLine={false} axisLine={false} />
-            <ZAxis type="category" dataKey="name" name="Item" />
-            <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
-            <Scatter name="Distribution" data={scatterData} fill="var(--accent-hover)" animationDuration={1500}>
-              {scatterData.map((_, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-              ))}
-            </Scatter>
-          </ScatterChart>
-        );
-
-      case 'bar':
-      default:
-        return (
-          <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-            <defs>
-              <linearGradient id="colorBar" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--accent-hover)" stopOpacity={1}/>
-                <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.3}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-            <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-            <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `${val}`} />
-            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
-            <Bar dataKey="value" radius={[6, 6, 0, 0]} animationDuration={1500}>
-              {data.map((_, index) => (
-                <Cell key={`cell-${index}`} fill="url(#colorBar)" />
-              ))}
-            </Bar>
-          </BarChart>
-        );
+const ChartVisuals = ({ type, series, points }: ChartVisualsProps) => {
+  if (type === 'scatter') {
+    if (points.length === 0) {
+      return <Placeholder>No plottable points for these two columns.</Placeholder>;
     }
-  };
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <ScatterChart margin={{ top: 16, right: 16, bottom: 16, left: 8 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <XAxis
+            type="number"
+            dataKey="x"
+            stroke="#94a3b8"
+            fontSize={12}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            type="number"
+            dataKey="y"
+            stroke="#94a3b8"
+            fontSize={12}
+            tickLine={false}
+            axisLine={false}
+          />
+          <ZAxis type="category" dataKey="name" name="Item" />
+          <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
+          <Scatter name="Distribution" data={points} fill={COLORS[1]} />
+        </ScatterChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (series.length === 0) {
+    return <Placeholder>No values to chart for this selection.</Placeholder>;
+  }
+
+  if (type === 'pie' || type === 'donut') {
+    // A slice cannot represent a negative contribution to a whole, and
+    // recharts renders those as an inverted wedge. Drop them and say so.
+    const positive = series.filter((point) => point.value > 0);
+    if (positive.length === 0) {
+      return (
+        <Placeholder>
+          Pie charts need positive values; try a bar chart for this column.
+        </Placeholder>
+      );
+    }
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Tooltip content={<CustomTooltip />} />
+          <Legend verticalAlign="bottom" height={36} iconType="circle" />
+          <Pie
+            data={positive}
+            cx="50%"
+            cy="50%"
+            innerRadius={type === 'donut' ? '55%' : 0}
+            outerRadius="80%"
+            paddingAngle={type === 'donut' ? 3 : 0}
+            dataKey="value"
+            nameKey="name"
+            stroke="none"
+          >
+            {positive.map((point, index) => (
+              <Cell key={point.name} fill={COLORS[index % COLORS.length]} />
+            ))}
+          </Pie>
+        </PieChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === 'line') {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={series} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke="rgba(255,255,255,0.05)"
+            vertical={false}
+          />
+          <XAxis
+            dataKey="name"
+            stroke="#94a3b8"
+            fontSize={12}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+          <Tooltip
+            content={<CustomTooltip />}
+            cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 2 }}
+          />
+          <Line
+            type="monotone"
+            dataKey="value"
+            stroke={COLORS[0]}
+            strokeWidth={3}
+            dot={{ r: 3, fill: '#fff' }}
+            activeDot={{ r: 6 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    );
+  }
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      {renderChart()}
+      <BarChart data={series} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
+        <defs>
+          {/* SVG ids are document-global; namespace it so a second chart
+              cannot silently steal this gradient. */}
+          <linearGradient id="dataNexusBarFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#818cf8" stopOpacity={1} />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity={0.3} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid
+          strokeDasharray="3 3"
+          stroke="rgba(255,255,255,0.05)"
+          vertical={false}
+        />
+        <XAxis
+          dataKey="name"
+          stroke="#94a3b8"
+          fontSize={12}
+          tickLine={false}
+          axisLine={false}
+        />
+        <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
+        <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="url(#dataNexusBarFill)" />
+      </BarChart>
     </ResponsiveContainer>
   );
 };
