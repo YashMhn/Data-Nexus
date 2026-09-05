@@ -1,6 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, vi } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
+
+// The default 1s findBy/waitFor timeout is enough locally but can lose a race
+// on a loaded CI runner, where these fetch-driven assertions turn flaky.
+configure({ asyncUtilTimeout: 5000 });
 
 // recharts measures its container; jsdom reports every element as 0x0, which
 // makes ResponsiveContainer render nothing. Give it a real size.
